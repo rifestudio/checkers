@@ -29,7 +29,6 @@ import {
   getValidMoves,
   getMandatoryCaptures,
   shouldBecomeKing,
-  getHintMove,
   rcToPos,
   posToRc,
 } from "@/lib/gameLogic";
@@ -254,10 +253,6 @@ export function CheckersBoard() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisAvailable, setAnalysisAvailable] = useState(false);
 
-  // ── AI explanation state ──────────────────────────────────────────────────
-  // Per-move cache of AI explanation responses. Each entry corresponds to a
-  // historyIndex in analysis mode. Once requested, the result is sticky for
-  // that move within the session — no auto-rerequest on navigation back.
   const [explanationCache, setExplanationCache] = useState<
     Map<number, AIExplanationResponse>
   >(new Map());
@@ -999,11 +994,18 @@ export function CheckersBoard() {
     setHint(null);
   }, [historyIndex, snapshots]);
 
+  // Hint via minimax engine at depth 4 — strong enough to actually be useful
+  // in a real game, fast enough (~50-100ms) to feel instant. Available only
+  // in AI mode so it can't be used as multiplayer cheating aid.
   const handleHint = useCallback(() => {
+    if (!isAIMode) return;
     if (isViewingHistory || currentPlayer !== playerSide) return;
-    const h = getHintMove(board, currentPlayer);
-    if (h) {
-      setHint(h);
+
+    const move = pickMove(board, currentPlayer, "expert");
+    if (move && move.steps.length > 0) {
+      const first = move.steps[0];
+      const last = move.steps[move.steps.length - 1];
+      setHint({ from: first.from, to: last.to });
       setShowHint(true);
       setSelectedPiece(null);
       setValidMoves([]);
@@ -1012,7 +1014,7 @@ export function CheckersBoard() {
         setHint(null);
       }, 3000);
     }
-  }, [board, currentPlayer, playerSide, isViewingHistory]);
+  }, [board, currentPlayer, playerSide, isViewingHistory, isAIMode]);
 
   const handleReset = useCallback(() => {
     const initial = createInitialSnapshot();
@@ -1127,9 +1129,6 @@ export function CheckersBoard() {
     }
   };
 
-  // ── Request AI explanation for the current move ──────────────────────────
-  // Reads from the local analysis result (already computed) + reconstructed
-  // prev-board, sends to the Edge Function. Caches result per historyIndex.
   const handleRequestExplanation = useCallback(async () => {
     if (!isAnalysisMode) return;
     if (historyIndex === 0) return;
@@ -1217,9 +1216,7 @@ export function CheckersBoard() {
     );
   }
 
-  // ── Render the AI explanation block in analysis card ──────────────────────
   function renderAIExplanationBlock() {
-    // Disabled if we don't have engine analysis yet for this move.
     if (!currentAnalysis) return null;
 
     if (currentExplanation?.kind === "ok") {
@@ -1728,7 +1725,6 @@ export function CheckersBoard() {
                         </div>
                       )}
 
-                    {/* AI explanation block — button to request, or text once loaded */}
                     {renderAIExplanationBlock()}
                   </div>
                 ) : null}
@@ -1837,16 +1833,19 @@ export function CheckersBoard() {
 
             {playerSide !== "spectator" && !isAnalysisMode && (
               <div className="space-y-2">
-                <button
-                  onClick={handleHint}
-                  disabled={isViewingHistory || currentPlayer !== playerSide}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
-                  border border-orange-500/20 bg-orange-500/5 text-orange-500
-                  hover:bg-orange-500/10 hover:border-orange-500/30
-                  disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-200 font-semibold text-sm"
-                >
-                  <Lightbulb className="w-4 h-4" /> Get Hint
-                </button>
+                {/* Hint only in AI mode — in multiplayer it'd be a cheating aid. */}
+                {isAIMode && (
+                  <button
+                    onClick={handleHint}
+                    disabled={isViewingHistory || currentPlayer !== playerSide}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
+                    border border-orange-500/20 bg-orange-500/5 text-orange-500
+                    hover:bg-orange-500/10 hover:border-orange-500/30
+                    disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-200 font-semibold text-sm"
+                  >
+                    <Lightbulb className="w-4 h-4" /> Get Hint
+                  </button>
+                )}
                 <button
                   onClick={handleResign}
                   disabled={isViewingHistory || gamePhase !== "playing"}
